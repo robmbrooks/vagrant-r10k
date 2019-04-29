@@ -33,6 +33,54 @@ module VagrantPlugins
     # General-use vagrant-r10k helper methosd
     module Helpers
 
+      # run the actual r10k deploy
+      def deploy(env, config)
+        @logger.debug("vagrant::r10k::deploy.deploy called")
+        require 'r10k/task_runner'
+        require 'r10k/task/puppetfile'
+
+        env[:ui].info "vagrant-r10k: Beginning r10k deploy of puppet modules into #{config[:module_path]} using #{config[:puppetfile_path]}"
+
+        if ENV["VAGRANT_LOG"] == "debug"
+          R10K::Logging.level = 'debug'
+        else
+          R10K::Logging.level = 'info'
+        end
+
+        unless File.file?(config[:puppetfile_path])
+          raise ErrorWrapper.new(RuntimeError.new("Puppetfile at #{config[:puppetfile_path]} does not exist."))
+        end
+
+        # do the actual module buildout
+        runner = R10K::TaskRunner.new([])
+        begin
+          puppetfile = get_puppetfile(config)
+          @logger.debug("vagrant-r10k: creating Puppetfile::Sync task")
+          task   = R10K::Task::Puppetfile::Sync.new(puppetfile)
+          @logger.debug("vagrant-r10k: appending task to runner queue")
+          runner.append_task task
+          @logger.debug("vagrant-r10k: running sync task")
+          runner.run
+          @logger.debug("vagrant-r10k: sync task complete")
+        rescue Exception => ex
+          env[:ui].error "Invalid syntax in Puppetfile at #{config[:puppetfile_path]}"
+          raise ErrorWrapper.new(ex.original)
+        end
+        unless runner.succeeded?
+          runner.get_errors().each do |error|
+            if error[1].message.include?("fatal: unable to access") and error[1].message.include?("Could not resolve host")
+              # if we can't resolve the host, the error should include how to skip provisioning
+              @logger.debug("vagrant-r10k: caught 'Could not resolve host' error")
+              raise ErrorWrapper.new(RuntimeError.new(error[1].message + "\n\nIf you don't have connectivity to the host, running 'vagrant up --no-provision' will skip r10k deploy and all provisioning."))
+            else
+              raise ErrorWrapper.new(RuntimeError.new(error[1]))
+            end
+          end
+        end
+        env[:ui].info "vagrant-r10k: Deploy finished"
+        @app.call(env) if @app.respond_to? :call
+      end
+
       # Determine if r10k.puppet_dir and r10k.puppetfile_path are in config
       #
       # @param [Vagrant::Environment] env
@@ -98,6 +146,7 @@ module VagrantPlugins
       # @return [Hash]
       def r10k_config(env)
         ret = { :module_path => nil }
+        ret[:auto_deploy] = env[:machine].config.r10k.auto_deploy
         ret[:env_dir_path] = env_dir(env)
         ret[:puppetfile_path] = puppetfile_path(env)
         prov = puppet_provisioner(env)

@@ -28,6 +28,11 @@ module VagrantPlugins
         end
       end
 
+      command 'r10k' do
+        require_relative "command"
+        Command
+      end
+
       config "r10k" do
         require_relative "config"
         Config

@@ -4,17 +4,31 @@ module VagrantPlugins
   module R10k
     # vagrant-r10k plugin configuration
     class Config < Vagrant.plugin('2', :config)
+      attr_accessor :auto_deploy
       attr_accessor :puppet_dir
       attr_accessor :puppetfile_path
       attr_accessor :module_path
 
+       DEFAULTS = {
+         auto_deploy: true
+       }
+
       # initialize config
       def initialize
+        @auto_deploy = UNSET_VALUE
         @puppet_dir = UNSET_VALUE
         @puppetfile_path = UNSET_VALUE
         @module_path = UNSET_VALUE
         @logger = Log4r::Logger.new("vagrant::r10k::config")
         @logger.debug("vagrant-r10k-config: initialize")
+      end
+
+      def finalize!
+        DEFAULTS.each do |name, value|
+          if instance_variable_get('@' + name.to_s) == UNSET_VALUE
+            instance_variable_set '@' + name.to_s, value
+          end
+        end
       end
 
       # validate configuration
